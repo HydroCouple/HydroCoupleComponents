@@ -1,0 +1,46 @@
+{
+  "name": "ns1:timeSeriesResponseType",
+  "value": {
+    "timeSeries": [
+      {
+        "sourceInfo": {
+          "siteName": "COLORADO RIVER AT LEES FERRY, AZ",
+          "siteCode": [{"value": "09380000", "agencyCode": "USGS"}]
+        },
+        "variable": {
+          "variableCode": [{"value": "00060"}],
+          "variableName": "Streamflow, ft&#179;/s",
+          "unit": {"unitCode": "ft3/s"}
+        },
+        "values": [
+          {
+            "value": [
+              {"value": "11400", "qualifiers": ["P"], "dateTime": "2020-01-01T00:00:00.000-07:00"},
+              {"value": "11500", "qualifiers": ["P"], "dateTime": "2020-01-01T06:00:00.000-07:00"},
+              {"value": "11350", "qualifiers": ["P"], "dateTime": "2020-01-01T12:00:00.000-07:00"}
+            ]
+          }
+        ]
+      },
+      {
+        "sourceInfo": {
+          "siteName": "COLORADO RIVER AT LEES FERRY, AZ",
+          "siteCode": [{"value": "09380000", "agencyCode": "USGS"}]
+        },
+        "variable": {
+          "variableCode": [{"value": "00065"}],
+          "variableName": "Gage height, ft",
+          "unit": {"unitCode": "ft"}
+        },
+        "values": [
+          {
+            "value": [
+              {"value": "9.85", "qualifiers": ["P"], "dateTime": "2020-01-01T00:00:00.000-07:00"},
+              {"value": "9.90", "qualifiers": ["P"], "dateTime": "2020-01-01T06:00:00.000-07:00"}
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

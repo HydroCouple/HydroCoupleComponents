@@ -15,12 +15,15 @@
 #include "hydrocouplesdk/core/valuedefinition.h"
 #include "hydrocouplesdk/temporal/timedata.h"
 #include "hydrocouplesdk/data/bufferio.h"
+#include "hydrocouplesdk/io/uriresolver.h"
 #include "hydrocouplesdk/temporal/timeseriesargument.h"
 
 #include <dlfcn.h>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -281,4 +284,175 @@ TEST_F(TimeSeriesProviderTest, ASeriesArgumentBindsToAProvidersOutput)
     ASSERT_NE(consumer.met->timeSeries(), nullptr);
     ASSERT_EQ(consumer.met->timeSeries()->count(), 3);
     EXPECT_DOUBLE_EQ(consumer.met->timeSeries()->values()[1], 6.0);
+}
+
+// ── USGS NWIS web sources (S2.2b) ─────────────────────────────────────────
+
+namespace {
+
+/*!
+ * The transport a host would install, in miniature: serves one payload,
+ * counts requests, and can be told to go offline.
+ */
+class StubResolver final : public IO::UriResolver
+{
+  public:
+    bool handles(const std::string &scheme) const override
+    {
+        return scheme == "http" || scheme == "https";
+    }
+    bool resolve(const std::string &, std::string &contents,
+                 std::string &message) override
+    {
+        if (offline)
+        {
+            message = "the stub is offline";
+            return false;
+        }
+        ++requests;
+        contents = payload;
+        return true;
+    }
+
+    std::string payload;
+    bool        offline  = false;
+    int         requests = 0;
+};
+
+//! Installs a resolver for one test and always uninstalls it.
+class ResolverGuard
+{
+  public:
+    explicit ResolverGuard(IO::UriResolver *resolver)
+    {
+        IO::setUriResolver(resolver);
+    }
+    ~ResolverGuard() { IO::setUriResolver(nullptr); }
+};
+
+std::string fileText(const std::string &path)
+{
+    std::ifstream file(path);
+    std::ostringstream text;
+    text << file.rdbuf();
+    return text.str();
+}
+
+constexpr const char *kNwisUrl =
+    "https://waterservices.usgs.gov/nwis/iv/?sites=09380000&format=json";
+
+} // namespace
+
+TEST_F(TimeSeriesProviderTest, NwisSeriesAreNamedSiteAndParameter)
+{
+    StubResolver resolver;
+    resolver.payload = fileText(fixture("nwis_iv.json"));
+    ResolverGuard guard(&resolver);
+
+    auto component = openSource(kNwisUrl);
+    ASSERT_NE(component, nullptr);
+    ASSERT_EQ(component->outputs().size(), 2u);
+
+    const auto *flow = series(*component, "09380000_00060");
+    ASSERT_NE(flow, nullptr);
+    ASSERT_EQ(flow->timeCount(), 3);
+    EXPECT_DOUBLE_EQ(valuesOf(*flow)[0], 11400.0);
+    EXPECT_DOUBLE_EQ(valuesOf(*flow)[2], 11350.0);
+    // 06:00 is a quarter day after midnight, as the service stamped it.
+    EXPECT_DOUBLE_EQ(flow->times()[1] - flow->times()[0], 0.25);
+
+    const auto *stage = series(*component, "09380000_00065");
+    ASSERT_NE(stage, nullptr);
+    EXPECT_DOUBLE_EQ(valuesOf(*stage)[1], 9.90);
+    EXPECT_EQ(resolver.requests, 1);
+}
+
+TEST_F(TimeSeriesProviderTest, AFetchIsCachedAndServedOffline)
+{
+    const std::string cachePath =
+        (std::filesystem::path(HCC_COMPONENTS_DIR) / "nwis_cache.json")
+            .string();
+    std::filesystem::remove(cachePath);
+
+    StubResolver resolver;
+    resolver.payload = fileText(fixture("nwis_iv.json"));
+    ResolverGuard guard(&resolver);
+
+    auto setCache = [&](IModelComponent &component) {
+        std::string message;
+        for (IArgument *argument : component.arguments())
+        {
+            if (argument->id() == "cache")
+                EXPECT_TRUE(argument->initialize(
+                    nlohmann::json{{"values", {cachePath}}}.dump(),
+                    IArgument::ArgumentInputType::JSON, message))
+                    << message;
+        }
+    };
+
+    // Online: the fetch lands in the cache file.
+    {
+        std::unique_ptr<IModelComponent> component =
+            s_info->createComponentInstance();
+        setCache(*component);
+        std::string message;
+        for (IArgument *argument : component->arguments())
+            if (argument->id() == "source")
+                ASSERT_TRUE(argument->initialize(
+                    nlohmann::json{{"values", {kNwisUrl}}}.dump(),
+                    IArgument::ArgumentInputType::JSON, message))
+                    << message;
+        component->initialize();
+        ASSERT_EQ(component->status(),
+                  IModelComponent::ComponentStatus::Initialized);
+        ASSERT_TRUE(std::filesystem::exists(cachePath));
+    }
+
+    // Offline: the cached numbers are the run's numbers.
+    resolver.offline = true;
+    {
+        std::unique_ptr<IModelComponent> component =
+            s_info->createComponentInstance();
+        setCache(*component);
+        std::string message;
+        for (IArgument *argument : component->arguments())
+            if (argument->id() == "source")
+                ASSERT_TRUE(argument->initialize(
+                    nlohmann::json{{"values", {kNwisUrl}}}.dump(),
+                    IArgument::ArgumentInputType::JSON, message))
+                    << message;
+        component->initialize();
+        ASSERT_EQ(component->status(),
+                  IModelComponent::ComponentStatus::Initialized);
+        const auto *flow = series(*component, "09380000_00060");
+        ASSERT_NE(flow, nullptr);
+        EXPECT_DOUBLE_EQ(valuesOf(*flow)[0], 11400.0);
+    }
+    EXPECT_EQ(resolver.requests, 1) << "the offline run must not refetch";
+}
+
+TEST_F(TimeSeriesProviderTest, AnEmptyAnswerFailsPointingAtTheCodes)
+{
+    StubResolver resolver;
+    resolver.payload = fileText(fixture("nwis_empty.json"));
+    ResolverGuard guard(&resolver);
+
+    std::string failure;
+    auto component = openSource(kNwisUrl, &failure);
+    EXPECT_EQ(component, nullptr);
+    EXPECT_NE(failure.find("site and parameter"), std::string::npos)
+        << failure;
+}
+
+TEST_F(TimeSeriesProviderTest, OfflineWithNoCacheFailsNamingBoth)
+{
+    StubResolver resolver;
+    resolver.offline = true;
+    ResolverGuard guard(&resolver);
+
+    std::string failure;
+    auto component = openSource(kNwisUrl, &failure);
+    EXPECT_EQ(component, nullptr);
+    EXPECT_NE(failure.find("cache"), std::string::npos) << failure;
+    EXPECT_NE(failure.find("offline"), std::string::npos) << failure;
 }

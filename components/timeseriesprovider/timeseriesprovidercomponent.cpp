@@ -26,6 +26,8 @@
 
 #include "hydrocouplesdk/componentabi.h"
 
+#include "hydrocouplesdk/io/uriresolver.h"
+
 #include "hydrocouplesdk/component/abstractmodelcomponent.h"
 #include "hydrocouplesdk/component/abstractmodelcomponentinfo.h"
 #include "hydrocouplesdk/core/dimension.h"
@@ -351,6 +353,83 @@ bool readSwmmDat(const std::string &text, const std::string &stem,
     return true;
 }
 
+/*!
+ * USGS NWIS JSON (instantaneous or daily values service): each
+ * \c value.timeSeries entry becomes one output named
+ * "<siteCode>_<parameterCode>". Timestamps are taken as given (the
+ * service's local-time offsets are not re-based — a consumer joining
+ * series from two zones converts once, knowingly, rather than being
+ * handed a silent shift).
+ */
+bool readNwisJson(const std::string &text, std::vector<ParsedSeries> &series,
+                  std::string &message)
+{
+    nlohmann::json document;
+    try
+    {
+        document = nlohmann::json::parse(text);
+    }
+    catch (const std::exception &e)
+    {
+        message = std::string("The service's answer is not JSON: ") +
+                  e.what();
+        return false;
+    }
+
+    if (!document.contains("value") ||
+        !document["value"].contains("timeSeries"))
+    {
+        message = "The answer carries no value.timeSeries block; is this "
+                  "the NWIS JSON service?";
+        return false;
+    }
+    for (const auto &entry : document["value"]["timeSeries"])
+    {
+        ParsedSeries parsed;
+        std::string site = "site", parameter = "param";
+        if (entry.contains("sourceInfo") &&
+            entry["sourceInfo"].contains("siteCode") &&
+            !entry["sourceInfo"]["siteCode"].empty())
+            site = entry["sourceInfo"]["siteCode"][0].value("value", site);
+        if (entry.contains("variable") &&
+            entry["variable"].contains("variableCode") &&
+            !entry["variable"]["variableCode"].empty())
+            parsed.name = site + "_" +
+                          entry["variable"]["variableCode"][0].value(
+                              "value", parameter);
+        else
+            parsed.name = site + "_" + parameter;
+
+        if (!entry.contains("values") || entry["values"].empty())
+            continue;
+        for (const auto &row : entry["values"][0].value(
+                 "value", nlohmann::json::array()))
+        {
+            double julianDay = 0.0, number = 0.0;
+            const std::string stamp = row.value("dateTime", "");
+            if (!parseDateTime(stamp, julianDay))
+            {
+                message = "Cannot read \"" + stamp + "\" as a date and time";
+                return false;
+            }
+            if (!parseNumber(row.value("value", ""), number))
+            {
+                message = "Cannot read \"" + row.value("value", "") +
+                          "\" as a number";
+                return false;
+            }
+            parsed.times.push_back(julianDay);
+            parsed.values.push_back(number);
+        }
+        if (!parsed.times.empty())
+            series.push_back(std::move(parsed));
+    }
+    if (series.empty())
+        message = "The service answered, but with no series — check the "
+                  "site and parameter codes";
+    return !series.empty();
+}
+
 // ── The component ─────────────────────────────────────────────────────────
 
 class TimeSeriesProviderComponent : public AbstractModelComponent
@@ -389,6 +468,7 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
 
     SDK::Argument1DString *source = nullptr;
     SDK::Argument1DString *format = nullptr;
+    SDK::Argument1DString *cache  = nullptr;
 
   protected:
     void createArguments() override
@@ -404,11 +484,20 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
         addArgument(source);
 
         m_formatQuality = std::make_unique<Quality>(
-            "Format", std::vector<std::string>{"auto", "csv", "w2", "swmm"});
+            "Format", std::vector<std::string>{"auto", "csv", "w2", "swmm",
+                                               "nwis"});
         format = new SDK::Argument1DString("format", &m_scalarDimension, 1,
                                            m_formatQuality.get(), this);
         (*format)[0] = std::string("auto");
         addArgument(format);
+
+        // Where a web fetch is kept for offline reruns: the run that
+        // fetched and the rerun on a plane read the same numbers.
+        cache = new SDK::Argument1DString("cache", &m_scalarDimension, 1,
+                                          m_text.get(), this);
+        (*cache)[0] = std::string();
+        cache->setIsOptional(true);
+        addArgument(cache);
     }
 
     bool initializeArguments(std::string &message) override
@@ -446,10 +535,88 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
     void initializeFailureCleanUp() override { m_series.clear(); }
 
   private:
+    /*!
+     * A web source travels through the process UriResolver seam — the SDK
+     * carries no transport of its own, and whichever host is running
+     * (Composer's HTTP resolver, a test's stub) supplies it. A successful
+     * fetch is written to the cache argument's path; a failed one falls
+     * back to that cache, so a rerun offline serves the numbers the run
+     * that fetched them saw. Refreshing is explicit: reinitialize with the
+     * network back.
+     */
+    [[nodiscard]] bool readWebSource(const std::string &url,
+                                     const std::string &formatName,
+                                     std::string &message)
+    {
+        std::string kind = formatName.empty() ? "auto" : formatName;
+        if (kind == "auto")
+        {
+            if (url.find("usgs.gov") != std::string::npos ||
+                url.find("/nwis/") != std::string::npos)
+                kind = "nwis";
+            else
+            {
+                message = "Unrecognized web service \"" + url +
+                          "\"; the registry knows USGS NWIS — set the "
+                          "format argument to \"nwis\" if this is one";
+                return false;
+            }
+        }
+        if (kind != "nwis")
+        {
+            message = "Web sources support only the \"nwis\" format today";
+            return false;
+        }
+
+        const std::string cachePath = trimmed((*cache)[0]);
+        std::string payload;
+        std::string fetchMessage;
+        if (IO::readReference(url, payload, fetchMessage))
+        {
+            if (!cachePath.empty())
+            {
+                std::ofstream file(cachePath);
+                file << payload;
+                if (!file)
+                {
+                    message = "Fetched, but cannot write the cache \"" +
+                              cachePath + "\"";
+                    return false;
+                }
+            }
+        }
+        else if (!cachePath.empty())
+        {
+            std::ifstream file(cachePath);
+            if (!file)
+            {
+                message = "The fetch failed (" + fetchMessage +
+                          ") and there is no cache at \"" + cachePath +
+                          "\"";
+                return false;
+            }
+            std::ostringstream text;
+            text << file.rdbuf();
+            payload = text.str();
+        }
+        else
+        {
+            message = "The fetch failed (" + fetchMessage +
+                      ") and no cache argument is set to fall back on";
+            return false;
+        }
+
+        return readNwisJson(payload, m_series, message);
+    }
+
     [[nodiscard]] bool readSource(const std::string &path,
                                   const std::string &formatName,
                                   std::string &message)
     {
+        const std::string scheme = IO::uriScheme(path);
+        if (scheme == "http" || scheme == "https")
+            return readWebSource(path, formatName, message);
+
         const std::string extension =
             std::filesystem::path(path).extension().string();
         const std::string stem =
@@ -518,9 +685,10 @@ class TimeSeriesProviderComponentInfo : public AbstractModelComponentInfo
     {
         setCaption("Time Series Provider");
         setDescription(
-            "Reads time series from CSV, CE-QUAL-W2 .npt, and SWMM-style "
-            ".dat files (web services to follow) and provides one output "
-            "per series, for exchange connections or @from bindings.");
+            "Reads time series from CSV, CE-QUAL-W2 .npt, SWMM-style .dat "
+            "files, and USGS NWIS web services (cached for offline "
+            "reruns), one output per series, for exchange connections "
+            "or @from bindings.");
         setDeveloper("HydroCouple");
         setVersion("0.1.0");
         setTags({"Provider", "Time Series"});
