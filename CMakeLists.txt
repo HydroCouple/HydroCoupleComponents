@@ -65,6 +65,7 @@ endfunction()
 
 add_subdirectory(components/smoke)
 add_subdirectory(components/meshgenerator)
+add_subdirectory(components/timeseriesprovider)
 
 if(HCC_BUILD_TESTS)
     enable_testing()
