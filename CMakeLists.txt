@@ -64,6 +64,7 @@ function(hcc_add_component name)
 endfunction()
 
 add_subdirectory(components/smoke)
+add_subdirectory(components/meshgenerator)
 
 if(HCC_BUILD_TESTS)
     enable_testing()
