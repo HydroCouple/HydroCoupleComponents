@@ -69,6 +69,7 @@ add_subdirectory(components/timeseriesprovider)
 add_subdirectory(components/signalsource)
 add_subdirectory(components/gaintransformer)
 add_subdirectory(components/recorder)
+add_subdirectory(components/combiner)
 
 if(HCC_BUILD_TESTS)
     enable_testing()

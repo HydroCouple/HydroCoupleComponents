@@ -6,6 +6,7 @@ add_executable(HydroCoupleComponentsTests
     test_meshgenerator.cpp
     test_timeseriesprovider.cpp
     test_signalchain.cpp
+    test_combiner.cpp
 )
 
 target_link_libraries(HydroCoupleComponentsTests
@@ -23,7 +24,8 @@ target_compile_definitions(HydroCoupleComponentsTests PRIVATE
     HCC_ARTIFACTS_DIR="${CMAKE_BINARY_DIR}/test-artifacts")
 
 add_dependencies(HydroCoupleComponentsTests hcc_smoke hcc_meshgenerator
-    hcc_timeseriesprovider hcc_signalsource hcc_gaintransformer hcc_recorder)
+    hcc_timeseriesprovider hcc_signalsource hcc_gaintransformer hcc_recorder
+    hcc_combiner)
 
 include(GoogleTest)
 gtest_discover_tests(HydroCoupleComponentsTests)
