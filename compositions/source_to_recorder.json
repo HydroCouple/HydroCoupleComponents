@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.1",
+  "metadata": {
+    "id": "testing-source-to-recorder",
+    "caption": "Signal source feeding a recorder, directly"
+  },
+  "components": [
+    { "id": "source",
+      "info": { "component_info_id": "hydrocouple.components.signal_source" },
+      "arguments": {
+        "waveform": { "values": ["constant"] },
+        "amplitude": { "values": [2.0] },
+        "offset": { "values": [3.0] },
+        "steps": { "values": [3] }
+      } },
+    { "id": "sink",
+      "info": { "component_info_id": "hydrocouple.components.recorder" },
+      "arguments": { "path": { "values": ["recorded_direct.csv"] } } }
+  ],
+  "connections": [
+    { "from": { "component": "source", "output": "signal" },
+      "to": { "component": "sink", "input": "in" } }
+  ],
+  "workflow": { "strategy": "time_stepped" }
+}

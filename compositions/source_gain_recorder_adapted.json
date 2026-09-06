@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.1",
+  "metadata": {
+    "id": "testing-adapted-chain",
+    "caption": "A ramp negated and clamped through the standalone factory, then scaled"
+  },
+  "components": [
+    { "id": "source",
+      "info": { "component_info_id": "hydrocouple.components.signal_source" },
+      "arguments": {
+        "waveform": { "values": ["ramp"] },
+        "amplitude": { "values": [8.0] },
+        "frequency": { "values": [0.25] },
+        "steps": { "values": [3] }
+      } },
+    { "id": "gain",
+      "info": { "component_info_id": "hydrocouple.components.gain" },
+      "arguments": {
+        "gain": { "values": [2.0] },
+        "bias": { "values": [1.0] }
+      } },
+    { "id": "sink",
+      "info": { "component_info_id": "hydrocouple.components.recorder" },
+      "arguments": { "path": { "values": ["recorded_adapted.csv"] } } }
+  ],
+  "connections": [
+    { "from": { "component": "source", "output": "signal",
+                "adapted_outputs": [
+                  { "factory": "hydrocouple.components.adapters.basic",
+                    "id": "negate" },
+                  { "factory": "hydrocouple.components.adapters.basic",
+                    "id": "clamp",
+                    "arguments": { "minimum": { "values": [-5.0] },
+                                   "maximum": { "values": [-3.0] } } }
+                ] },
+      "to": { "component": "gain", "input": "in" } },
+    { "from": { "component": "gain", "output": "out" },
+      "to": { "component": "sink", "input": "in" } }
+  ],
+  "workflow": { "strategy": "time_stepped" }
+}

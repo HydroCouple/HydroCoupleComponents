@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.1",
+  "metadata": {
+    "id": "testing-bound-arguments",
+    "caption": "A calibration source initializing the gain's bias via @from"
+  },
+  "components": [
+    { "id": "calibration",
+      "info": { "component_info_id": "hydrocouple.components.signal_source" },
+      "arguments": {
+        "waveform": { "values": ["constant"] },
+        "offset": { "values": [99.0] },
+        "steps": { "values": [1] }
+      } },
+    { "id": "source",
+      "info": { "component_info_id": "hydrocouple.components.signal_source" },
+      "arguments": {
+        "waveform": { "values": ["constant"] },
+        "offset": { "values": [4.0] },
+        "steps": { "values": [2] }
+      } },
+    { "id": "gain",
+      "info": { "component_info_id": "hydrocouple.components.gain" },
+      "arguments": {
+        "gain": { "values": [1.0] },
+        "bias": { "@from": { "component": "calibration",
+                             "output": "signal" } }
+      } },
+    { "id": "sink",
+      "info": { "component_info_id": "hydrocouple.components.recorder" },
+      "arguments": { "path": { "values": ["recorded_bound.csv"] } } }
+  ],
+  "connections": [
+    { "from": { "component": "source", "output": "signal" },
+      "to": { "component": "gain", "input": "in" } },
+    { "from": { "component": "gain", "output": "out" },
+      "to": { "component": "sink", "input": "in" } }
+  ],
+  "workflow": { "strategy": "time_stepped" }
+}
