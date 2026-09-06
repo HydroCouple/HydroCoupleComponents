@@ -7,6 +7,7 @@ add_executable(HydroCoupleComponentsTests
     test_timeseriesprovider.cpp
     test_signalchain.cpp
     test_combiner.cpp
+    test_basicadapters.cpp
 )
 
 target_link_libraries(HydroCoupleComponentsTests
@@ -25,7 +26,7 @@ target_compile_definitions(HydroCoupleComponentsTests PRIVATE
 
 add_dependencies(HydroCoupleComponentsTests hcc_smoke hcc_meshgenerator
     hcc_timeseriesprovider hcc_signalsource hcc_gaintransformer hcc_recorder
-    hcc_combiner)
+    hcc_combiner hcc_basicadapters)
 
 include(GoogleTest)
 gtest_discover_tests(HydroCoupleComponentsTests)

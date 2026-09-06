@@ -70,6 +70,7 @@ add_subdirectory(components/signalsource)
 add_subdirectory(components/gaintransformer)
 add_subdirectory(components/recorder)
 add_subdirectory(components/combiner)
+add_subdirectory(components/basicadapters)
 
 if(HCC_BUILD_TESTS)
     enable_testing()
