@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.1",
+  "metadata": {
+    "id": "arggen-demo-a",
+    "caption": "ARGGEN Demo A — mesh generator, met provider, and FVQual, all live"
+  },
+  "components": [
+    {
+      "id": "meshgen",
+      "info": { "component_info_id": "hydrocouple.components.meshgenerator" },
+      "arguments": {
+        "boundary": { "values": [[0.0, 0.0], [600.0, 0.0], [600.0, 100.0], [0.0, 100.0]] },
+        "max_edge_length": { "values": [50.0] }
+      }
+    },
+    {
+      "id": "met",
+      "info": { "component_info_id": "hydrocouple.components.timeseriesprovider" },
+      "arguments": {
+        "source": { "values": ["demo_met.csv"] }
+      }
+    },
+    {
+      "id": "basin",
+      "info": { "component_info_id": "fvqual.component" },
+      "arguments": {
+        "geometry_counts": { "values": [6, 4] },
+        "geometry_values": { "values": [600.0, 100.0, 12.0, 10.0, 3600.0, 10800.0] },
+        "mesh": { "@from": { "component": "meshgen", "output": "mesh" } },
+        "met_air_temperature": { "@from": { "component": "met", "output": "air_temperature" } }
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": {
+        "component": "met",
+        "output": "air_temperature",
+        "adapted_outputs": [
+          { "factory": "hydrocouple.sdk.adapters", "id": "temporal_interpolation" }
+        ]
+      },
+      "to": { "component": "basin", "input": "air_temperature" }
+    }
+  ],
+  "workflow": { "strategy": "time_stepped", "max_steps": 12 },
+  "writers": [
+    { "type": "csv", "path": "results.csv" }
+  ],
+  "run": { "manifest": "run.json" }
+}

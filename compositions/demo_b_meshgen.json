@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.1",
+  "metadata": {
+    "id": "arggen-demo-b-meshgen",
+    "caption": "ARGGEN Demo B, run 1 — the mesh generator standalone"
+  },
+  "components": [
+    {
+      "id": "meshgen",
+      "info": { "component_info_id": "hydrocouple.components.meshgenerator" },
+      "arguments": {
+        "boundary": { "values": [[0.0, 0.0], [600.0, 0.0], [600.0, 100.0], [0.0, 100.0]] },
+        "max_edge_length": { "values": [50.0] }
+      }
+    }
+  ],
+  "workflow": { "strategy": "time_stepped", "max_steps": 4 },
+  "run": { "manifest": "meshgen_run.json" }
+}
