@@ -167,7 +167,7 @@ TEST_F(CombinerTest, CombinerRefusesAProviderForAnUnknownRole)
     // Role-less consumption is refused, and so is a role nothing declared —
     // each naming the roles that DO exist, because the fixer's next move is
     // to pick one.
-    EXPECT_FALSE(operands->canConsume(out, message));
+    EXPECT_FALSE(operands->canConsume(out, message, nullptr));
     EXPECT_NE(message.find("augend"), std::string::npos) << message;
 
     HydroCouple::SDK::Identity stranger("multiplicand", "Stranger");

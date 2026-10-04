@@ -102,30 +102,28 @@ class MeshSurfaceOutput final
         return false;
     }
 
-    [[nodiscard]] HydroCouple::Spatial::MeshDataObjectType
-    meshDataObjectType() const override
+    //! On a 2-D surface a cell is a face.
+    [[nodiscard]] HydroCouple::Spatial::MeshLocation location() const override
     {
-        return HydroCouple::Spatial::MeshDataObjectType::Cell;
+        return HydroCouple::Spatial::MeshLocation::Face;
     }
     [[nodiscard]] HydroCouple::Spatial::SpatialDataType meshDataType()
         const override
     {
         return HydroCouple::Spatial::SpatialDataType::Scalar;
     }
+    [[nodiscard]] HydroCouple::Spatial::VectorBasis vectorBasis()
+        const override
+    {
+        return HydroCouple::Spatial::VectorBasis::Unknown;
+    }
     [[nodiscard]] HydroCouple::Spatial::IPolyhedralSurface *
     polyhedralSurface() const override
     {
         return m_adapter.get();
     }
-    [[nodiscard]] HydroCouple::IDimension *patchDimension() const override
-    {
-        return nullptr;
-    }
-    [[nodiscard]] HydroCouple::IDimension *edgeDimension() const override
-    {
-        return nullptr;
-    }
-    [[nodiscard]] HydroCouple::IDimension *vertexDimension() const override
+    //! Geometry-only: shape() is empty, so there is no entity dimension.
+    [[nodiscard]] HydroCouple::IDimension *entityDimension() const override
     {
         return nullptr;
     }

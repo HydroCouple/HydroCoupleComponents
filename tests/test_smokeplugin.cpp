@@ -116,8 +116,8 @@ TEST_F(SmokePluginTest, ACreatedInstanceRunsToFinishedAndProduces)
         double value = -1.0;
         const int64_t shape[1] = {1};
         const HydroCouple::BufferDescriptor destination{
-            &value, HydroCouple::DataKind::Float64, 1, shape, nullptr,
-            HydroCouple::MemorySpace::Host, 0};
+            &value, HydroCouple::DataKind::Float64, 1, shape, nullptr, 0,
+            HydroCouple::MemorySpace::Host};
         const int64_t zero = 0;
         const int64_t one  = 1;
         std::string message;
