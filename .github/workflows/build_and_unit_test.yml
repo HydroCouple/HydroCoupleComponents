@@ -1,0 +1,106 @@
+name: Build and Unit Test
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # HydroCoupleSDK 2.0 is not on a package registry yet, so the job builds and
+  # installs it from source first. These are the branches that carry SDK 2.0
+  # and the interface headers it is built against.
+  SDK_REF: removing_qt
+  HYDROCOUPLE_REF: dev
+
+jobs:
+  build_and_test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout HydroCoupleComponents
+        uses: actions/checkout@v4
+        with:
+          path: HydroCoupleComponents
+
+      - name: Checkout HydroCoupleSDK
+        uses: actions/checkout@v4
+        with:
+          repository: HydroCouple/HydroCoupleSDK
+          ref: ${{ env.SDK_REF }}
+          path: HydroCoupleSDK
+
+      - name: Checkout HydroCouple interface headers
+        uses: actions/checkout@v4
+        with:
+          repository: HydroCouple/HydroCouple
+          ref: ${{ env.HYDROCOUPLE_REF }}
+          path: HydroCouple
+
+      # Same vcpkg commit as HydroCoupleSDK's own CI, so the SDK is built
+      # from the dependency versions it is validated against. The default
+      # (static) triplets are used: the SDK absorbs its IO backends, and
+      # nothing here links them a second time.
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # The full IO feature set: consumers of an installed SDK expect every
+      # backend to be present. "tests" brings GoogleTest into the SDK's vcpkg
+      # tree, where this repository's tests find it.
+      - name: Configure HydroCoupleSDK
+        run: >
+          cmake -S HydroCoupleSDK -B build-sdk -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          "-DVCPKG_MANIFEST_FEATURES=tests;hdf5;geopackage;netcdf;tools"
+          -DHYDROCOUPLE_INCLUDE_DIR="$GITHUB_WORKSPACE/HydroCouple/include"
+          -DUSE_GDAL=OFF -DUSE_NETCDF=ON -DUSE_HDF5=ON -DUSE_GEOPACKAGE=ON -DUSE_OPENMP=OFF
+          -DBUILD_TOOLS=ON -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
+
+      - name: Build and install HydroCoupleSDK
+        run: |
+          cmake --build build-sdk --parallel
+          cmake --install build-sdk --prefix "$GITHUB_WORKSPACE/sdk-install"
+
+      # The installed SDK, plus the vcpkg tree it was built with: its package
+      # config resolves nlohmann_json with find_dependency(), and the tests
+      # need GoogleTest.
+      - name: Configure HydroCoupleComponents
+        run: |
+          triplet_dir=$(echo "$GITHUB_WORKSPACE"/build-sdk/vcpkg_installed/*-*/ | cut -d' ' -f1)
+          cmake -S HydroCoupleComponents -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/sdk-install;${triplet_dir%/}" \
+            -DHCC_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts-${{ matrix.os }}
+          path: build/test-artifacts/
+          if-no-files-found: ignore
