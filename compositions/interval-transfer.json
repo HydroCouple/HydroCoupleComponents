@@ -1,0 +1,171 @@
+{
+  "components": [
+    {
+      "id": "controlled-source",
+      "info": {
+        "component_info_id": "org.hydrocouple.openswmm.test.interval-source"
+      },
+      "arguments": {
+        "config": {
+          "schema": "hydrocouple.interval-transfer/1",
+          "epoch_julian_day": 2440587.5,
+          "species": [
+            {
+              "id": "NH4_N",
+              "basis": "kg-N"
+            },
+            {
+              "id": "NO3_N",
+              "basis": "kg-N"
+            }
+          ],
+          "intervals": [
+            {
+              "start_s": 0,
+              "end_s": 60,
+              "water_m3": 2,
+              "enthalpy_j": 100,
+              "species": {
+                "NH4_N": 0.2,
+                "NO3_N": 0.1
+              }
+            },
+            {
+              "start_s": 60,
+              "end_s": 90,
+              "water_m3": 3,
+              "enthalpy_j": 150,
+              "species": {
+                "NH4_N": 0.3,
+                "NO3_N": 0.15
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "conservative-receiver",
+      "info": {
+        "component_info_id": "org.hydrocouple.openswmm.test.sink"
+      },
+      "arguments": {
+        "config": {
+          "schema": "hydrocouple.interval-transfer/1",
+          "epoch_julian_day": 2440587.5,
+          "species": [
+            {
+              "id": "NH4_N",
+              "basis": "kg-N"
+            },
+            {
+              "id": "NO3_N",
+              "basis": "kg-N"
+            }
+          ],
+          "expected_transfers": 2,
+          "receipt_file": "out/interval-receipts.csv"
+        },
+        "scale": {
+          "values": [
+            1
+          ]
+        }
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": {
+        "component": "controlled-source",
+        "output": "transfer_id"
+      },
+      "to": {
+        "component": "conservative-receiver",
+        "input": "transfer_id"
+      }
+    },
+    {
+      "from": {
+        "component": "controlled-source",
+        "output": "epoch_julian_day"
+      },
+      "to": {
+        "component": "conservative-receiver",
+        "input": "epoch_julian_day"
+      }
+    },
+    {
+      "from": {
+        "component": "controlled-source",
+        "output": "interval_start_s"
+      },
+      "to": {
+        "component": "conservative-receiver",
+        "input": "interval_start_s"
+      }
+    },
+    {
+      "from": {
+        "component": "controlled-source",
+        "output": "interval_end_s"
+      },
+      "to": {
+        "component": "conservative-receiver",
+        "input": "interval_end_s"
+      }
+    },
+    {
+      "from": {
+        "component": "controlled-source",
+        "output": "water_m3"
+      },
+      "to": {
+        "component": "conservative-receiver",
+        "input": "water_m3"
+      }
+    },
+    {
+      "from": {
+        "component": "controlled-source",
+        "output": "enthalpy_j"
+      },
+      "to": {
+        "component": "conservative-receiver",
+        "input": "enthalpy_j"
+      }
+    },
+    {
+      "from": {
+        "component": "controlled-source",
+        "output": "species.NH4_N"
+      },
+      "to": {
+        "component": "conservative-receiver",
+        "input": "species.NH4_N"
+      }
+    },
+    {
+      "from": {
+        "component": "controlled-source",
+        "output": "species.NO3_N"
+      },
+      "to": {
+        "component": "conservative-receiver",
+        "input": "species.NO3_N"
+      }
+    }
+  ],
+  "workflow": {
+    "strategy": "time_stepped"
+  },
+  "writers": [
+    {
+      "type": "csv",
+      "path": "out/interval-results.csv"
+    }
+  ],
+  "run": {
+    "manifest": "out/interval-manifest.json"
+  }
+}

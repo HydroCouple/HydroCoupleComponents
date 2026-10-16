@@ -3,6 +3,7 @@ find_package(GTest REQUIRED)
 
 add_executable(HydroCoupleComponentsTests
     test_smokeplugin.cpp
+    test_intervalreceiver.cpp
     test_meshgenerator.cpp
     test_timeseriesprovider.cpp
     test_signalchain.cpp
@@ -21,12 +22,14 @@ target_link_libraries(HydroCoupleComponentsTests
 )
 
 target_compile_definitions(HydroCoupleComponentsTests PRIVATE
+    HCC_SOURCE_LIBRARY="$<TARGET_FILE:hcc_intervalsource>"
+    HCC_RECEIVER_LIBRARY="$<TARGET_FILE:hcc_intervalreceiver>"
     HCC_COMPONENTS_DIR="${CMAKE_BINARY_DIR}/components"
     HCC_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
     HCC_ARTIFACTS_DIR="${CMAKE_BINARY_DIR}/test-artifacts"
     HCC_COMPOSITIONS_DIR="${CMAKE_SOURCE_DIR}/compositions")
 
-add_dependencies(HydroCoupleComponentsTests hcc_smoke hcc_meshgenerator
+add_dependencies(HydroCoupleComponentsTests hcc_intervalsource hcc_intervalreceiver hcc_smoke hcc_meshgenerator
     hcc_timeseriesprovider hcc_signalsource hcc_gaintransformer hcc_recorder
     hcc_combiner hcc_basicadapters)
 

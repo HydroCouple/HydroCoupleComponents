@@ -33,3 +33,10 @@ SWMM-style `.dat`, NetCDF CF, USGS NWIS), TerrainSamplerComponent.
 ## License
 
 MIT — see `LICENSE`.
+
+## Custom interval-transfer reference
+
+The [developer guide](docs/INTERVAL_TRANSFER_COMPONENTS.md) describes the
+executable source/receiver pair, configured species metadata, typed water/mass/heat
+ports, receipt accounting and custom-component conformance tests. The worked
+composition is `compositions/interval-transfer.json`.

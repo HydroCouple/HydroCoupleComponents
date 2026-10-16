@@ -71,6 +71,7 @@ add_subdirectory(components/gaintransformer)
 add_subdirectory(components/recorder)
 add_subdirectory(components/combiner)
 add_subdirectory(components/basicadapters)
+add_subdirectory(components/intervalreceiver)
 
 if(HCC_BUILD_TESTS)
     enable_testing()

@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+hcc_add_component(hcc_intervalreceiver intervalcomponents.cpp)
+hcc_add_component(hcc_intervalsource intervalcomponents.cpp)
+target_compile_definitions(hcc_intervalsource PRIVATE HCC_INTERVAL_SOURCE)
