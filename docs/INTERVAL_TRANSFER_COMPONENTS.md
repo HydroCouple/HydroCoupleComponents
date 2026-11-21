@@ -45,8 +45,8 @@ physical amounts. Conservation qualification requires scale 1. Other scales
 exercise configuration only. The source requires scale 1.
 
 Apply arguments before `initialize()`. Initialization builds the actual port
-catalogue and validates configuration; it does not advance a model or create
-output files. Configure another instance to change the catalogue. Serialization
+catalog and validates configuration; it does not advance a model or create
+output files. Configure another instance to change the catalog. Serialization
 of `config` returns the same JSON object. Composer's edit-time instance follows
 the same path and is separate from the run's instance.
 

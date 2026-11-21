@@ -1,0 +1,80 @@
+name: Documentation
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+    paths: ['docs/**', 'components/**', 'compositions/**', 'tests/**', '*.md',
+            '.github/workflows/documentation.yml']
+  pull_request:
+    branches: [ "main", "dev" ]
+    paths: ['docs/**', 'components/**', 'compositions/**', 'tests/**', '*.md',
+            '.github/workflows/documentation.yml']
+  workflow_dispatch:
+
+jobs:
+# ─────────────────────────────────────────────────────────────────────────────
+# Build the C++ manual (Doxygen) and keep it as an artifact.
+#   This workflow only builds; nothing here publishes the site.
+# ─────────────────────────────────────────────────────────────────────────────
+  build_doxygen_docs:
+    name: Build C++ Docs (Doxygen)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Graphviz and download tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz wget tar
+
+      - name: Install Doxygen 1.13.2
+        run: |
+          DOXYGEN_VERSION=1.13.2
+          # Doxygen release TAGS use underscores (Release_1_13_2) while the
+          # asset filename uses dots (doxygen-1.13.2.linux.bin.tar.gz).
+          DOXYGEN_TAG="Release_${DOXYGEN_VERSION//./_}"
+          wget -q "https://github.com/doxygen/doxygen/releases/download/${DOXYGEN_TAG}/doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz"
+          tar -xzf doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz
+          sudo mv doxygen-${DOXYGEN_VERSION}/bin/doxygen /usr/local/bin/doxygen
+          doxygen --version
+
+      - name: Build Doxygen HTML docs
+        # The component sources pass through namespace_docs_filter.py
+        # (python3), which documents each plugin's unnamed namespace.
+        working-directory: docs
+        run: |
+          set -o pipefail
+          doxygen Doxyfile 2>&1 | tee doxygen.log
+
+      - name: Fail on Doxygen warnings
+        # The manual builds without warnings, so any warning fails, including
+        # one from the namespace filter for a source file it has no entry for.
+        # Notices about configuration tags this Doxygen build does not support
+        # ("warning: Tag '...'") describe the binary, not the sources.
+        working-directory: docs
+        run: |
+          if grep "warning:" doxygen.log | grep -v "^warning: Tag '"; then
+            echo "::error::Doxygen reported warnings (see above)"
+            exit 1
+          fi
+
+      - name: Archive Doxygen docs
+        # Doxygen can generate names such as functions_:.html. Transfer one
+        # archive because upload-artifact rejects colons in individual paths.
+        run: tar -czf doxygen-docs.tar.gz -C docs/html .
+
+      - name: Upload Doxygen docs artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: doxygen-docs
+          path: doxygen-docs.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

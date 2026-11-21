@@ -24,11 +24,26 @@ in-tree.
 
 ## Components
 
+Providers:
+
+- `hcc_meshgenerator` — MeshGeneratorComponent: triangulates a boundary
+  with the SDK Triangulator, optionally merged to quad-dominant by the
+  QuadMesher, and provides the mesh live or as a UGRID file.
+- `hcc_timeseriesprovider` — TimeSeriesProviderComponent: CSV, CE-QUAL-W2
+  `.npt`, SWMM-style `.dat` and USGS NWIS (cached for offline reruns), one
+  output per series.
+
+Testing family (deterministic components for exercising compositions):
+
+- `hcc_signalsource`, `hcc_gaintransformer`, `hcc_recorder`, `hcc_combiner`
+  and `hcc_basicadapters`, a standalone adapted-output factory.
 - `hcc_smoke` — the scaffold's proof plugin (test fixture, not a tool).
 
-Planned (see `plans/`): MeshGeneratorComponent (SDK Triangulator /
-QuadMesher), TimeSeriesProviderComponent (CSV, CE-QUAL-W2 `.npt`,
-SWMM-style `.dat`, NetCDF CF, USGS NWIS), TerrainSamplerComponent.
+Interval transfer: `hcc_intervalsource` and `hcc_intervalreceiver`, the
+reference pair described below.
+
+Planned (see `plans/`): NetCDF CF series in TimeSeriesProviderComponent
+(refused with a message today), TerrainSamplerComponent.
 
 ## License
 
