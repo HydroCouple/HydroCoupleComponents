@@ -16,8 +16,7 @@ on:
 
 jobs:
 # ─────────────────────────────────────────────────────────────────────────────
-# Build the C++ manual (Doxygen) and keep it as an artifact.
-#   This workflow only builds; nothing here publishes the site.
+# Build the C++ manual (Doxygen) and keep it as an artifact; publish it from main.
 # ─────────────────────────────────────────────────────────────────────────────
   build_doxygen_docs:
     name: Build C++ Docs (Doxygen)
@@ -78,3 +77,35 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Publish the manual from main to GitHub Pages (Pages must use "GitHub Actions"
+# as its source).
+# ─────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build_doxygen_docs
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Download Doxygen docs artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: doxygen-docs
+      - name: Unpack the manual
+        run: mkdir site && tar -xzf doxygen-docs.tar.gz -C site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5
