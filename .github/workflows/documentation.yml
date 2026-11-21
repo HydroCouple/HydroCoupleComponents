@@ -80,12 +80,15 @@ jobs:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Publish the manual from main to GitHub Pages (Pages must use "GitHub Actions"
-# as its source).
+# as its source). The organization's plan offers Pages only for public
+# repositories, so the job is skipped while this repository is private.
 # ─────────────────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to GitHub Pages
     needs: build_doxygen_docs
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: >-
+      github.ref == 'refs/heads/main' && !github.event.repository.private &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       pages: write
