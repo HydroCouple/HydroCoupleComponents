@@ -76,4 +76,6 @@ add_subdirectory(components/intervalreceiver)
 if(HCC_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+    # The manual's compiled examples, run as docs.example.* tests.
+    add_subdirectory(docs/examples)
 endif()

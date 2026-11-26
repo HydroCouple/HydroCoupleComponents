@@ -1,0 +1,5 @@
+{"value": {"timeSeries": [
+  {"sourceInfo": {"siteCode": [{"value": "09380000"}]},
+   "variable": {"variableCode": [{"value": "00060"}]},
+   "values": [{"value": [{"value": "11400", "dateTime": "noon"}]}]}
+]}}

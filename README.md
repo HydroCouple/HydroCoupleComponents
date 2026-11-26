@@ -20,7 +20,8 @@ ctest --test-dir build
 ```
 
 Without an installed SDK, pass `-DHCC_SDK_SOURCE_DIR=<path>` to build it
-in-tree.
+in-tree. [Getting started](docs/pages/getting_started.md) gives the full
+build, including an SDK built with vcpkg.
 
 ## Components
 
@@ -44,6 +45,25 @@ reference pair described below.
 
 Planned (see `plans/`): NetCDF CF series in TimeSeriesProviderComponent
 (refused with a message today), TerrainSamplerComponent.
+
+## Manual
+
+- [Getting started](docs/pages/getting_started.md): build, test, load the
+  plugins and run a first composition.
+- [Concepts](docs/pages/concepts.md): the loading convention, the component
+  lifecycle, arguments, exchange items, and how a composition becomes a run.
+- [Tutorial](docs/pages/tutorial_component.md): write, build, package and
+  load a new component, starting from the smoke component.
+- [Component reference](docs/pages/component_reference.md): one page per
+  component, with every argument, port, status message and error.
+- [Composition cookbook](docs/pages/cookbook.md): each document in
+  `compositions/`, what it shows and what its run produces.
+- [Troubleshooting](docs/pages/troubleshooting.md): load failures, ABI
+  stamp mismatches, refused connections and arguments.
+- [Developing an interval-transfer component](docs/INTERVAL_TRANSFER_COMPONENTS.md).
+
+The manual's code and outputs come from compiled examples in
+`docs/examples/`, which run as ctest tests with the label `docs-example`.
 
 ## License
 

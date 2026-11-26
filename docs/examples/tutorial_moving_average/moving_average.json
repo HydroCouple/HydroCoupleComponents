@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.1",
+  "metadata": {
+    "id": "tutorial-moving-average",
+    "caption": "A ramp averaged over two steps and recorded"
+  },
+  "components": [
+    { "id": "source",
+      "info": { "component_info_id": "hydrocouple.components.signal_source" },
+      "arguments": {
+        "waveform": { "values": ["ramp"] },
+        "amplitude": { "values": [8.0] },
+        "frequency": { "values": [0.25] },
+        "steps": { "values": [4] }
+      } },
+    { "id": "average",
+      "info": { "component_info_id": "hydrocouple.components.docs.moving_average" },
+      "arguments": { "window": { "values": [2] } } },
+    { "id": "sink",
+      "info": { "component_info_id": "hydrocouple.components.recorder" },
+      "arguments": { "path": { "values": ["moving_average.csv"] } } }
+  ],
+  "connections": [
+    { "from": { "component": "source", "output": "signal" },
+      "to": { "component": "average", "input": "in" } },
+    { "from": { "component": "average", "output": "average" },
+      "to": { "component": "sink", "input": "in" } }
+  ],
+  "workflow": { "strategy": "time_stepped" }
+}

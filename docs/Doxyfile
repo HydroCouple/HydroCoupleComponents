@@ -994,9 +994,21 @@ WARN_LOGFILE           =
 INPUT                  = ../README.md \
                          ./pages/getting_started.md \
                          ./pages/concepts.md \
+                         ./pages/tutorial_component.md \
+                         ./pages/component_reference.md \
                          ./pages/providers.md \
+                         ./pages/ref_meshgenerator.md \
+                         ./pages/ref_timeseriesprovider.md \
                          ./pages/testing_components.md \
+                         ./pages/ref_signalsource.md \
+                         ./pages/ref_gaintransformer.md \
+                         ./pages/ref_recorder.md \
+                         ./pages/ref_combiner.md \
+                         ./pages/ref_basicadapters.md \
                          ./pages/interval_transfer.md \
+                         ./pages/ref_smoke.md \
+                         ./pages/cookbook.md \
+                         ./pages/troubleshooting.md \
                          ./INTERVAL_TRANSFER_COMPONENTS.md \
                          ../components
 
@@ -1088,7 +1100,8 @@ EXCLUDE_SYMBOLS        =
 # ;//! [marker] pairs, so prose and deck cannot drift apart.
 EXAMPLE_PATH           = ../compositions \
                          ../tests \
-                         ../components
+                         ../components \
+                         ./examples
 
 # If the value of the EXAMPLE_PATH tag contains directories, you can use the
 # EXAMPLE_PATTERNS tag to specify one or more wildcard pattern (like *.cpp and

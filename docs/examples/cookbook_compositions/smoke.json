@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.1",
+  "metadata": {
+    "id": "smoke-alone",
+    "caption": "The smoke component on its own"
+  },
+  "components": [
+    { "id": "smoke",
+      "info": { "component_info_id": "hydrocouple.components.smoke" } }
+  ],
+  "workflow": { "strategy": "time_stepped" }
+}
