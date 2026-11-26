@@ -39,22 +39,43 @@ namespace
 /*!
  * \brief Shared skeleton: pull the adaptee's rank-1 Double slab, transform
  *        it element-wise, serve the result.
+ *
+ * An SDK AbstractAdaptedOutput, so a HydroCouple::IAdaptedOutput that is
+ * itself an output: it can feed an input or another adapted output. Its
+ * shape is the adaptee's; its values are the transformed copy made by the
+ * last refresh(). Arguments are read once, in initialize(). The adaptee
+ * and the factory are not owned; the caller that owns the adapted output
+ * unregisters it from its adaptee before destroying it.
  */
 class ElementwiseAdaptedOutput : public AbstractAdaptedOutput
 {
   public:
+    /*!
+     * \brief Creates the adapted output over \p adaptee.
+     * \param[in] id      The instance ID, `<offering>#<n>`.
+     * \param[in] adaptee The output adapted; not owned.
+     * \param[in] factory The factory that created it; not owned.
+     */
     ElementwiseAdaptedOutput(std::string_view id, IOutput *adaptee,
                              IAdaptedOutputFactory *factory)
       : AbstractAdaptedOutput(id, {}, nullptr, adaptee, factory)
     {
     }
 
+    //! Reads the arguments, then computes the first values.
     void initialize() override
     {
         latchArguments();
         refresh();
     }
 
+    /*!
+     * \brief Pulls the adaptee's values, transforms each, and refreshes
+     *        the adapted outputs chained to this one.
+     *
+     * When the adaptee is missing, is not rank 1, or refuses the read, the
+     * previous values stay and nothing is signaled.
+     */
     void refresh() override
     {
         std::vector<double> source;
@@ -73,19 +94,36 @@ class ElementwiseAdaptedOutput : public AbstractAdaptedOutput
         refreshAdaptedOutputs();
     }
 
+    //! The same as refresh().
     void updateValues() override { refresh(); }
 
+    /*!
+     * \brief The adaptee's shape.
+     * \returns The adaptee's shape, or an empty shape without one.
+     */
     [[nodiscard]] std::vector<int64_t> shape() const override
     {
         IOutput *provider = adaptee();
         return provider ? provider->shape() : std::vector<int64_t>{};
     }
 
+    //! \returns DataKind::Float64.
     [[nodiscard]] DataKind dataKind() const override
     {
         return DataKind::Float64;
     }
 
+    /*!
+     * \brief Copies a hyperslab of the transformed values.
+     * \param[in]  destination The caller's buffer.
+     * \param[in]  start       First index, rank 1.
+     * \param[in]  count       Number of values, rank 1.
+     * \param[out] message     Why the copy failed, when not null.
+     * \returns false with "adapted output "\<id\>" has no values;
+     *          initialize() has not run" while there are no values (also
+     *          for an adaptee of length 0), or when the slab or buffer does
+     *          not match.
+     */
     [[nodiscard]] bool getValuesInto(const BufferDescriptor &destination,
                                      std::span<const int64_t> start,
                                      std::span<const int64_t> count,
@@ -108,6 +146,11 @@ class ElementwiseAdaptedOutput : public AbstractAdaptedOutput
             destination, start, count, message);
     }
 
+    /*!
+     * \brief Refuses every write.
+     * \param[out] message "adapted outputs are read-only", when not null.
+     * \returns false.
+     */
     [[nodiscard]] bool setValuesFrom(const BufferDescriptor &,
                                      std::span<const int64_t>,
                                      std::span<const int64_t>,
@@ -124,9 +167,20 @@ class ElementwiseAdaptedOutput : public AbstractAdaptedOutput
     //! Reads argument values into coefficients before the first transform.
     virtual void latchArguments() {}
 
+    /*!
+     * \brief The element-wise map.
+     * \param[in] value One adaptee value.
+     * \returns The adapted value.
+     */
     [[nodiscard]] virtual double transform(double value) const = 0;
 
   private:
+    /*!
+     * \brief Reads the whole adaptee.
+     * \param[out] into Resized to the adaptee's length and filled.
+     * \returns false when there is no adaptee, it is not rank 1, or the
+     *          read fails.
+     */
     bool pullAdaptee(std::vector<double> &into) const
     {
         IOutput *provider = adaptee();
@@ -155,24 +209,49 @@ class ElementwiseAdaptedOutput : public AbstractAdaptedOutput
             std::span<const int64_t>(&providerShape[0], 1), nullptr);
     }
 
+    //! The transformed values of the last successful refresh.
     std::vector<double> m_values;
 };
 
+/*!
+ * \brief The `negate` offering: every value's negative, `-x`. It has no
+ *        arguments.
+ */
 class NegateAdaptedOutput final : public ElementwiseAdaptedOutput
 {
   public:
     using ElementwiseAdaptedOutput::ElementwiseAdaptedOutput;
 
   protected:
+    /*!
+     * \brief Negates one value.
+     * \param[in] value One adaptee value.
+     * \returns `-value`.
+     */
     [[nodiscard]] double transform(double value) const override
     {
         return -value;
     }
 };
 
+/*!
+ * \brief The `clamp` offering: every value limited to [`minimum`,
+ *        `maximum`].
+ *
+ * Its two Float64 arguments, `minimum` (default -1e30) and `maximum`
+ * (default 1e30), are members of the adapted output and are read in
+ * initialize(). It does not check that `minimum` is at most `maximum`;
+ * std::clamp's result is undefined when it is not.
+ */
 class ClampAdaptedOutput final : public ElementwiseAdaptedOutput
 {
   public:
+    /*!
+     * \brief Creates the adapted output and its two arguments.
+     * \param[in] id      The instance ID, `clamp#<n>`.
+     * \param[in] adaptee The output adapted; not owned.
+     * \param[in] factory The factory that created it; not owned.
+     */
     ClampAdaptedOutput(std::string_view id, IOutput *adaptee,
                        IAdaptedOutputFactory *factory)
       : ElementwiseAdaptedOutput(id, adaptee, factory),
@@ -186,34 +265,61 @@ class ClampAdaptedOutput final : public ElementwiseAdaptedOutput
     }
 
   protected:
+    //! Reads the first value of `minimum` and of `maximum`.
     void latchArguments() override
     {
         m_minimum = m_minimumArgument[0];
         m_maximum = m_maximumArgument[0];
     }
 
+    /*!
+     * \brief Limits one value to the bounds.
+     * \param[in] value One adaptee value.
+     * \returns `std::clamp(value, minimum, maximum)`.
+     */
     [[nodiscard]] double transform(double value) const override
     {
         return std::clamp(value, m_minimum, m_maximum);
     }
 
   private:
+    //! The one dimension of the two arguments.
     Dimension m_scalar{"scalar"};
+    //! Unitless quantity "Clamp bound" of the two arguments.
     std::unique_ptr<Quantity> m_quantity{Quantity::unitLess("Clamp bound")};
 
+    //! `minimum` argument, a member; registered with the base class.
     Argument1DDouble m_minimumArgument;
+    //! `maximum` argument, a member; registered with the base class.
     Argument1DDouble m_maximumArgument;
 
+    //! Latched lower bound.
     double m_minimum = -1.0e30;
+    //! Latched upper bound.
     double m_maximum = 1.0e30;
 };
 
 class BasicAdaptersComponentInfo;
 
+/*!
+ * \brief The factory instance: offers `negate` and `clamp` for rank-1
+ *        Float64 outputs and creates them.
+ *
+ * An SDK AbstractAdaptedOutputFactoryComponent, so a
+ * HydroCouple::IAdaptedOutputFactoryComponent, not a model component. It
+ * owns its two offering identities; it does not own the adapted outputs it
+ * creates. Its ID is the info ID, the ID a composition's
+ * `adapted_outputs` entries name in their `factory` field.
+ */
 class BasicAdaptersComponent final
   : public AbstractAdaptedOutputFactoryComponent
 {
   public:
+    /*!
+     * \brief Creates the factory and its two offerings.
+     * \param[in] id   The factory ID, `hydrocouple.components.adapters.basic`.
+     * \param[in] info The info that created it; owned by the library.
+     */
     BasicAdaptersComponent(std::string_view id,
                            AbstractAdaptedOutputFactoryComponentInfo *info)
       : AbstractAdaptedOutputFactoryComponent(id, info)
@@ -224,6 +330,13 @@ class BasicAdaptersComponent final
             "clamp", "Clamp to [minimum, maximum]"));
     }
 
+    /*!
+     * \brief The offerings for \p provider.
+     * \param[in] provider The output to adapt.
+     * \returns `negate` and `clamp` for a rank-1 Float64 provider of any
+     *          length, adapted outputs included; nothing otherwise. The
+     *          consumer is not considered.
+     */
     std::vector<IIdentity *> getAvailableAdaptedOutputIds(
         const IOutput *provider, const IInput * = nullptr) override
     {
@@ -241,6 +354,17 @@ class BasicAdaptersComponent final
         return available;
     }
 
+    /*!
+     * \brief Creates one adapted output and registers it with \p provider.
+     * \param[in] adaptedProviderId The offering, `negate` or `clamp`.
+     * \param[in] provider          The output to adapt; not owned.
+     * \returns The adapted output, ID `<offering>#<n>` with n counting this
+     *          factory's creations from 1, owned by the caller; null for a
+     *          null argument or an unknown offering. The provider's
+     *          registration is non-owning: the caller removes it with
+     *          removeAdaptedOutput() before destroying the adapted output.
+     *          Call the adapted output's initialize() before reading it.
+     */
     std::unique_ptr<IAdaptedOutput> createAdaptedOutput(
         IIdentity *adaptedProviderId, IOutput *provider,
         IInput * = nullptr) override
@@ -278,14 +402,26 @@ class BasicAdaptersComponent final
     }
 
   private:
+    //! The offerings `negate` and `clamp`, owned here.
     std::vector<std::unique_ptr<Identity>> m_offerings;
+    //! Adapted outputs created so far; numbers their IDs.
     int m_created = 0;
 };
 
+/*!
+ * \brief Metadata for the factory, and the factory for its instances.
+ *
+ * An IAdaptedOutputFactoryComponentInfo, not an IModelComponentInfo, so a
+ * host lists the library among its adapter factories. Published by
+ * HYDROCOUPLE_DECLARE_COMPONENT; the library owns it. Component info ID
+ * `hydrocouple.components.adapters.basic`, caption "Basic Adapters",
+ * version 1.0.0, tags Test and Adapters.
+ */
 class BasicAdaptersComponentInfo final
   : public AbstractAdaptedOutputFactoryComponentInfo
 {
   public:
+    //! Sets the ID, caption, description, developer, version and tags.
     BasicAdaptersComponentInfo()
       : AbstractAdaptedOutputFactoryComponentInfo(
           "hydrocouple.components.adapters.basic")
@@ -299,6 +435,12 @@ class BasicAdaptersComponentInfo final
         setTags({"Test", "Adapters"});
     }
 
+    /*!
+     * \brief Creates a factory instance.
+     * \returns A factory whose ID is this info's ID, owned by the caller,
+     *          who destroys it, and every adapted output it made, before the
+     *          library is unloaded.
+     */
     std::unique_ptr<IAdaptedOutputFactoryComponent>
     createComponentInstance() override
     {

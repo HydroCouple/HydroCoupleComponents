@@ -52,15 +52,24 @@ using namespace HydroCouple::SDK;
 namespace
 {
 
+/*!
+ * \brief One series read from a source, before it becomes an output.
+ */
 struct ParsedSeries
 {
-    std::string         name;
+    std::string         name;   //!< The output ID the series gets.
     std::vector<double> times;  //!< Julian days.
-    std::vector<double> values;
+    std::vector<double> values; //!< One value per time, as read.
 };
 
 // ── Small parsing helpers ─────────────────────────────────────────────────
 
+/*!
+ * \brief Removes leading and trailing spaces, tabs, carriage returns and
+ *        line feeds.
+ * \param[in] text Any text.
+ * \returns The trimmed copy; empty when \p text is only whitespace.
+ */
 std::string trimmed(const std::string &text)
 {
     const auto begin = text.find_first_not_of(" \t\r\n");
@@ -70,6 +79,13 @@ std::string trimmed(const std::string &text)
     return text.substr(begin, end - begin + 1);
 }
 
+/*!
+ * \brief Reads a whole token as a number with std::strtod.
+ * \param[in]  token The token; surrounding whitespace is ignored.
+ * \param[out] value The number; set even when the token has trailing text.
+ * \returns true when the trimmed token is nonempty and strtod consumed all
+ *          of it, so "1.5" and "2e3" pass and "1.5m" fails.
+ */
 bool parseNumber(const std::string &token, double &value)
 {
     const std::string clean = trimmed(token);
@@ -84,6 +100,14 @@ bool parseNumber(const std::string &token, double &value)
  * Calendar text to a Julian day. Two spellings cover the files in the
  * wild: ISO ("2020-01-31 06:30[:00]", 'T' separator accepted) and US
  * ("01/31/2020 06:30"). The time of day is optional in both.
+ *
+ * The ISO form is taken only when the first '-' is the fifth character,
+ * that is, after a four-digit year. Anything after the seconds (fractions,
+ * a zone offset) is ignored, and the fields are not range-checked before
+ * TimeData::gregorianToJulianDay converts them.
+ * \param[in]  token     The text; surrounding whitespace is ignored.
+ * \param[out] julianDay The time as a Julian day.
+ * \returns false when neither form reads at least a year, month and day.
  */
 bool parseDateTime(const std::string &token, double &julianDay)
 {
@@ -111,6 +135,9 @@ bool parseDateTime(const std::string &token, double &julianDay)
 }
 
 //! A time token is a number (already Julian) or calendar text.
+//! \param[in]  token     The text of a time field.
+//! \param[out] julianDay The time as a Julian day.
+//! \returns false when the token is neither.
 bool parseTime(const std::string &token, double &julianDay)
 {
     if (parseNumber(token, julianDay))
@@ -118,6 +145,13 @@ bool parseTime(const std::string &token, double &julianDay)
     return parseDateTime(token, julianDay);
 }
 
+/*!
+ * \brief Splits a line at every comma and trims each field.
+ *
+ * There is no quoting: a comma always separates fields.
+ * \param[in] line One line of a CSV file.
+ * \returns The fields; a trailing comma adds no empty field.
+ */
 std::vector<std::string> splitCsvLine(const std::string &line)
 {
     std::vector<std::string> fields;
@@ -134,6 +168,19 @@ std::vector<std::string> splitCsvLine(const std::string &line)
  * Delimited CSV: the first column is time, every other column one series.
  * A header row is detected by reading, not assumed: a first line whose
  * time field parses as neither number nor calendar text is names.
+ *
+ * Blank lines and lines starting with '#' are skipped. The first data row
+ * fixes the number of series; a series without a header name is called
+ * `<stem>_<column>`, counting the value columns from 1.
+ * \param[in]  text    The whole file.
+ * \param[in]  stem    The file name without directory or extension.
+ * \param[out] series  Receives one entry per value column.
+ * \param[out] message Why the file was refused: "CSV line \<n\> has fewer
+ *                     than two columns", "CSV line \<n\>: cannot read "\<t\>"
+ *                     as a time", "CSV line \<n\> has \<k\> values but \<m\>
+ *                     series", "CSV line \<n\>: cannot read "\<v\>" as a
+ *                     number", or "The CSV holds no data rows".
+ * \returns false on the first refused line, or when there are no rows.
  */
 bool readCsv(const std::string &text, const std::string &stem,
              std::vector<ParsedSeries> &series, std::string &message)
@@ -217,6 +264,19 @@ bool readCsv(const std::string &text, const std::string &stem,
  * CE-QUAL-W2 \c .npt: a title line, a header line naming the columns, then
  * whitespace-separated rows of Julian day and values. Blank and \c $ / \c #
  * marker lines are skipped, as W2 decks carry them.
+ *
+ * A row is data when its first token is a number; the first non-numeric
+ * row is the title and any later one replaces the column names. The first
+ * data row fixes the number of series. Extra values on a later row are
+ * ignored and missing ones are skipped, so series can end up with
+ * different lengths.
+ * \param[in]  text    The whole file.
+ * \param[in]  stem    The file name without directory or extension; names
+ *                     unnamed series `<stem>_<column>`.
+ * \param[out] series  Receives one entry per value column.
+ * \param[out] message "W2 row "\<row\>": cannot read "\<v\>" as a number" or
+ *                     "The .npt deck holds no data rows".
+ * \returns false on an unreadable value or when there are no rows.
  */
 bool readW2Npt(const std::string &text, const std::string &stem,
                std::vector<ParsedSeries> &series, std::string &message)
@@ -286,6 +346,18 @@ bool readW2Npt(const std::string &text, const std::string &stem,
  * two-token row reuses the date of the row before it — exactly how SWMM's
  * own external time-series files carry a day of readings. One series,
  * named after the file.
+ *
+ * Tokens after the third are ignored. The date and time are read together
+ * by parseDateTime(), so both calendar forms work.
+ * \param[in]  text    The whole file.
+ * \param[in]  stem    The file name without directory or extension; the
+ *                     series name.
+ * \param[out] series  Receives the one series.
+ * \param[out] message "Cannot read .dat line "\<line\>": expected date time
+ *                     value", "Cannot read "\<date\> \<time\>" as a date and
+ *                     time", "Cannot read "\<v\>" as a number" or "The .dat
+ *                     file holds no data rows".
+ * \returns false on the first refused line, or when there are no rows.
  */
 bool readSwmmDat(const std::string &text, const std::string &stem,
                  std::vector<ParsedSeries> &series, std::string &message)
@@ -356,10 +428,25 @@ bool readSwmmDat(const std::string &text, const std::string &stem,
 /*!
  * USGS NWIS JSON (instantaneous or daily values service): each
  * \c value.timeSeries entry becomes one output named
- * "<siteCode>_<parameterCode>". Timestamps are taken as given (the
+ * "\<siteCode\>_\<parameterCode\>". Timestamps are taken as given (the
  * service's local-time offsets are not re-based — a consumer joining
  * series from two zones converts once, knowingly, rather than being
  * handed a silent shift).
+ *
+ * An entry without `sourceInfo.siteCode` takes the site `site`, and one
+ * without `variable.variableCode` the parameter `param`, so such an entry
+ * is named `site_param`. Only the first block of an entry's `values` is
+ * read; an entry without values, or with an empty first block, is skipped.
+ * Each value is a string read as a number.
+ * \param[in]  text    The service's answer.
+ * \param[out] series  Receives one entry per series with readings.
+ * \param[out] message "The service's answer is not JSON: <parser
+ *                     message>", "The answer carries no value.timeSeries
+ *                     block; is this the NWIS JSON service?", "Cannot read
+ *                     "\<stamp\>" as a date and time", "Cannot read "\<v\>" as
+ *                     a number", or "The service answered, but with no
+ *                     series — check the site and parameter codes".
+ * \returns false on any of those.
  */
 bool readNwisJson(const std::string &text, std::vector<ParsedSeries> &series,
                   std::string &message)
@@ -432,14 +519,46 @@ bool readNwisJson(const std::string &text, std::vector<ParsedSeries> &series,
 
 // ── The component ─────────────────────────────────────────────────────────
 
+/*!
+ * \brief Reads one source and serves each of its series as an output.
+ *
+ * A HydroCouple::IModelComponent on the SDK's AbstractModelComponent with
+ * three String arguments (`source`, `format`, `cache`), no inputs, and one
+ * SDK Temporal::TimeSeriesOutputDouble per series, named after the series,
+ * with a unitless quantity of the same name and times in Julian days. The
+ * source is read during initialize(), because the outputs are its series;
+ * update() changes nothing.
+ *
+ * Relative `source` and `cache` paths are opened relative to the process's
+ * working directory, not the reference directory. Web sources go through
+ * the SDK's process-wide UriResolver, which the host installs.
+ *
+ * Ownership: it creates its arguments and exchange items with `new` and
+ * only registers them with the base class, which lists but never deletes
+ * them, so they are not freed when the instance is destroyed, and each
+ * further initialize() leaves the previous ports behind. It owns the
+ * quantities and dimensions they point to; each Quantity::unitLess()
+ * quantity also allocates a Unit that nothing frees.
+ * It is driven from one thread at a time.
+ */
 class TimeSeriesProviderComponent : public AbstractModelComponent
 {
   public:
+    /*!
+     * \brief Creates the component in the Created state.
+     * \param[in] id The instance ID; the info passes
+     *               `hydrocouple.components.timeseriesprovider.instance`.
+     */
     explicit TimeSeriesProviderComponent(std::string_view id)
       : AbstractModelComponent(id, "Time Series Provider")
     {
     }
 
+    /*!
+     * \brief Reports Valid: the source was read and checked while the
+     *        component initialized.
+     * \returns An empty list.
+     */
     std::vector<std::string> validate() override
     {
         setStatus(ComponentStatus::Validating);
@@ -447,12 +566,20 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
         return {};
     }
 
+    //! Moves to Updated with the message "prepared".
     void prepare() override
     {
         setStatus(ComponentStatus::Preparing);
         setStatus(ComponentStatus::Updated, "prepared");
     }
 
+    /*!
+     * \brief Reports Done with the message "series served".
+     *
+     * It moves from Updated to Done without passing through Updating, a
+     * transition the interface's table rejects, so the SDK queues "illegal
+     * status transition Updated -> Done" on errors() at the first update.
+     */
     void update(const std::vector<IOutput *> & = {}) override
     {
         // The series were read while the ports were made; a provider's run
@@ -460,17 +587,29 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
         setStatus(ComponentStatus::Done, "series served");
     }
 
+    /*!
+     * \brief Moves through Finishing to Finished; the outputs keep their
+     *        series.
+     */
     void finish() override
     {
         setStatus(ComponentStatus::Finishing);
         setStatus(ComponentStatus::Finished);
     }
 
+    //! `source`, a file path or URL; registered, never deleted.
     SDK::Argument1DString *source = nullptr;
+    //! `format`, the reader to use; registered, never deleted.
     SDK::Argument1DString *format = nullptr;
+    //! `cache`, the web answer's file; registered, never deleted.
     SDK::Argument1DString *cache  = nullptr;
 
   protected:
+    /*!
+     * \brief Creates `source` (empty, with file filters for .csv, .npt and
+     *        .dat), `format` ("auto", with a Quality listing auto, csv, w2,
+     *        swmm and nwis) and the optional `cache` (empty).
+     */
     void createArguments() override
     {
         m_text.reset(Quantity::unitLess("Source"));
@@ -500,6 +639,15 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
         addArgument(cache);
     }
 
+    /*!
+     * \brief Reads the source into the series the outputs will serve.
+     *
+     * An empty `source`, after trimming, is a valid provider with no
+     * outputs. `format` is trimmed and matched exactly, case included.
+     * \param[out] message The reader's or fetch's message on failure, or
+     *                     cleared.
+     * \returns false when the source cannot be read.
+     */
     bool initializeArguments(std::string &message) override
     {
         m_series.clear();
@@ -514,8 +662,13 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
         return readSource(path, trimmed((*format)[0]), message);
     }
 
+    //! The component has no inputs.
     void createInputs() override {}
 
+    /*!
+     * \brief Creates one TimeSeriesOutputDouble per series read, in the
+     *        order the source holds them, each with one time step per row.
+     */
     void createOutputs() override
     {
         for (const ParsedSeries &entry : m_series)
@@ -532,6 +685,7 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
         }
     }
 
+    //! Drops whatever the failed read collected.
     void initializeFailureCleanUp() override { m_series.clear(); }
 
   private:
@@ -543,6 +697,22 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
      * back to that cache, so a rerun offline serves the numbers the run
      * that fetched them saw. Refreshing is explicit: reinitialize with the
      * network back.
+     *
+     * With `format` empty or `auto`, a URL containing `usgs.gov` or `/nwis/`
+     * is NWIS; another URL is refused. The cache file is overwritten on
+     * every successful fetch and is not created in a missing directory.
+     * \param[in]  url        The http or https URL.
+     * \param[in]  formatName The trimmed `format` value.
+     * \param[out] message    "Unrecognized web service "\<url\>"; the
+     *                        registry knows USGS NWIS — set the format
+     *                        argument to "nwis" if this is one", "Web
+     *                        sources support only the "nwis" format today",
+     *                        "Fetched, but cannot write the cache "\<path\>"",
+     *                        "The fetch failed (\<reason\>) and there is no
+     *                        cache at "\<path\>"", "The fetch failed
+     *                        (\<reason\>) and no cache argument is set to fall
+     *                        back on", or a readNwisJson() message.
+     * \returns false on any of those.
      */
     [[nodiscard]] bool readWebSource(const std::string &url,
                                      const std::string &formatName,
@@ -609,6 +779,26 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
         return readNwisJson(payload, m_series, message);
     }
 
+    /*!
+     * \brief Chooses the reader for \p path and runs it.
+     *
+     * An http or https URL goes to readWebSource(). For a file, `format`
+     * empty or `auto` chooses by extension, case-sensitively: `.csv` csv,
+     * `.npt` w2, `.dat` swmm, `.nc` the refused netcdf kind. An explicit
+     * `netcdf` is refused the same way, and an explicit `nwis` is unknown
+     * for a file.
+     * \param[in]  path       The trimmed `source` value.
+     * \param[in]  formatName The trimmed `format` value.
+     * \param[out] message    "Cannot tell the format of "\<path\>" from its
+     *                        extension; tried .csv, .npt, .dat, .nc — set
+     *                        the format argument explicitly", "NetCDF CF
+     *                        time series are not implemented yet; convert
+     *                        to CSV, or wait for the registry's next
+     *                        entry", "Cannot open "\<path\>"", "Unknown format
+     *                        "\<f\>"; the registry knows csv, w2, swmm", or a
+     *                        reader's message.
+     * \returns false on any of those.
+     */
     [[nodiscard]] bool readSource(const std::string &path,
                                   const std::string &formatName,
                                   std::string &message)
@@ -666,20 +856,33 @@ class TimeSeriesProviderComponent : public AbstractModelComponent
         return false;
     }
 
+    //! The one dimension of the three arguments.
     Dimension m_scalarDimension{"scalar", "Single value"};
+    //! The time dimension of every output.
     Dimension m_timeDimension{"time", "Time"};
+    //! Unitless quantity of `source` and `cache`.
     std::unique_ptr<Quantity> m_text;
+    //! The format names, offered to hosts as choices for `format`.
     std::unique_ptr<Quality>  m_formatQuality;
+    //! One unitless quantity per output created; kept across
+    //! reinitializations.
     std::vector<std::unique_ptr<Quantity>> m_quantities;
+    //! The series read by the last initialization.
     std::vector<ParsedSeries> m_series;
 };
 
 /*!
- * \brief Metadata for TimeSeriesProviderComponent.
+ * \brief Metadata for TimeSeriesProviderComponent, and the factory for its
+ *        instances.
+ *
+ * Published by HYDROCOUPLE_DECLARE_COMPONENT; the library owns it.
+ * Component info ID `hydrocouple.components.timeseriesprovider`, caption
+ * "Time Series Provider", version 0.1.0, tags Provider and Time Series.
  */
 class TimeSeriesProviderComponentInfo : public AbstractModelComponentInfo
 {
   public:
+    //! Sets the ID, caption, description, developer, version and tags.
     TimeSeriesProviderComponentInfo()
       : AbstractModelComponentInfo("hydrocouple.components.timeseriesprovider")
     {
@@ -694,6 +897,13 @@ class TimeSeriesProviderComponentInfo : public AbstractModelComponentInfo
         setTags({"Provider", "Time Series"});
     }
 
+    /*!
+     * \brief Creates a new instance in the Created state.
+     * \returns An instance with ID
+     *          `hydrocouple.components.timeseriesprovider.instance`, owned
+     *          by the caller, who destroys it before the library is
+     *          unloaded.
+     */
     std::unique_ptr<IModelComponent> createComponentInstance() override
     {
         return std::make_unique<TimeSeriesProviderComponent>(

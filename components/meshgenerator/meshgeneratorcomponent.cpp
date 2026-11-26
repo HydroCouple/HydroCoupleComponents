@@ -55,18 +55,34 @@ namespace
  * Geometry-only: the surface and its mesh view are the payload, and the
  * hyperslab plane says so instead of inventing per-face values nobody
  * asked for. A consumer's PolyhedralSurfaceArgument reads the meshView().
+ *
+ * An SDK AbstractOutput that is also a
+ * HydroCouple::Spatial::IPolyhedralSurfaceComponentDataItem located on
+ * faces. polyhedralSurface() is null until the first successful update().
+ * It owns the PolyhedralSurfaceAdapter, which owns the mesh; a new mesh
+ * replaces the previous one, so a pointer taken from polyhedralSurface()
+ * is valid until the next update() or the component's destruction.
  */
 class MeshSurfaceOutput final
     : public AbstractOutput,
       public virtual HydroCouple::Spatial::IPolyhedralSurfaceComponentDataItem
 {
   public:
+    /*!
+     * \brief Creates the output with no mesh.
+     * \param[in] id        The output ID, `mesh`.
+     * \param[in] component The owning component.
+     */
     MeshSurfaceOutput(std::string_view id,
                       HydroCouple::IModelComponent *component)
       : AbstractOutput(id, {}, nullptr, component)
     {
     }
 
+    /*!
+     * \brief Replaces the served mesh and signals a value change.
+     * \param[in] mesh The generated mesh, moved into the adapter.
+     */
     void setMesh(IO::MeshDefinition mesh)
     {
         m_adapter = std::make_unique<SDK::Spatial::PolyhedralSurfaceAdapter>(
@@ -77,11 +93,19 @@ class MeshSurfaceOutput final
     //! The mesh is produced by the run, not pulled from a provider.
     void updateValues() override {}
 
+    //! \returns An empty shape: the output carries geometry, not values.
     [[nodiscard]] std::vector<int64_t> shape() const override { return {}; }
+    //! \returns DataKind::Float64, nominally; there are no values to read.
     [[nodiscard]] DataKind dataKind() const override
     {
         return DataKind::Float64;
     }
+    /*!
+     * \brief Refuses every read.
+     * \param[out] message "The mesh output is geometry; read its
+     *                     meshView()", when not null.
+     * \returns false.
+     */
     [[nodiscard]] bool getValuesInto(const BufferDescriptor &,
                                      std::span<const int64_t>,
                                      std::span<const int64_t>,
@@ -92,6 +116,12 @@ class MeshSurfaceOutput final
             *message = "The mesh output is geometry; read its meshView()";
         return false;
     }
+    /*!
+     * \brief Refuses every write.
+     * \param[out] message "The mesh output is produced by the run", when
+     *                     not null.
+     * \returns false.
+     */
     [[nodiscard]] bool setValuesFrom(const BufferDescriptor &,
                                      std::span<const int64_t>,
                                      std::span<const int64_t>,
@@ -103,46 +133,91 @@ class MeshSurfaceOutput final
     }
 
     //! On a 2-D surface a cell is a face.
+    //! \returns MeshLocation::Face.
     [[nodiscard]] HydroCouple::Spatial::MeshLocation location() const override
     {
         return HydroCouple::Spatial::MeshLocation::Face;
     }
+    //! \returns SpatialDataType::Scalar.
     [[nodiscard]] HydroCouple::Spatial::SpatialDataType meshDataType()
         const override
     {
         return HydroCouple::Spatial::SpatialDataType::Scalar;
     }
+    //! \returns VectorBasis::Unknown: the output has no vector values.
     [[nodiscard]] HydroCouple::Spatial::VectorBasis vectorBasis()
         const override
     {
         return HydroCouple::Spatial::VectorBasis::Unknown;
     }
+    /*!
+     * \brief The generated surface.
+     * \returns The surface, owned by this output, or null before the first
+     *          successful update().
+     */
     [[nodiscard]] HydroCouple::Spatial::IPolyhedralSurface *
     polyhedralSurface() const override
     {
         return m_adapter.get();
     }
     //! Geometry-only: shape() is empty, so there is no entity dimension.
+    //! \returns null.
     [[nodiscard]] HydroCouple::IDimension *entityDimension() const override
     {
         return nullptr;
     }
 
   private:
+    //! The served surface and the mesh behind it; null until the first
+    //! mesh.
     std::unique_ptr<SDK::Spatial::PolyhedralSurfaceAdapter> m_adapter;
 };
 
 /*!
  * \brief Triangulates a boundary into a mesh, as a run.
+ *
+ * A HydroCouple::IModelComponent on the SDK's AbstractModelComponent with
+ * four arguments (`boundary`, `max_edge_length`, `quad_quality`,
+ * `output_path`), no inputs and one output, `mesh`, a MeshSurfaceOutput.
+ * validate() checks the boundary's shape and the quality range; update()
+ * does all the work in one step through Tools::Triangulator and, for a
+ * quality above 0, Tools::QuadMesher, forwarding their progress stages as
+ * Updating status messages, optionally writes a UGRID file, and reports
+ * Done with the message "meshed". Coordinates, lengths and the quality are
+ * unitless.
+ *
+ * Ownership: it creates its arguments and exchange items with `new` and
+ * only registers them with the base class, which lists but never deletes
+ * them, so they are not freed when the instance is destroyed, and each
+ * further initialize() leaves the previous ports behind. It owns the
+ * quantities and dimensions they point to; each Quantity::unitLess()
+ * quantity also allocates a Unit that nothing frees.
+ * The output owns the mesh. The component is driven from one thread at a
+ * time, and the tools' progress callback runs on that thread.
  */
 class MeshGeneratorComponent : public AbstractModelComponent
 {
   public:
+    /*!
+     * \brief Creates the component in the Created state.
+     * \param[in] id The instance ID; the info passes
+     *               `hydrocouple.components.meshgenerator.instance`.
+     */
     explicit MeshGeneratorComponent(std::string_view id)
       : AbstractModelComponent(id, "Mesh Generator")
     {
     }
 
+    /*!
+     * \brief Checks the boundary's size and shape and the quality range.
+     * \returns Every problem found, in this order: "The boundary needs at
+     *          least three vertices; it has \<n\>", "The boundary must be an
+     *          N x 2 table of x, y", "quad_quality must lie in [0, 1]; 0
+     *          keeps triangles". The status is Invalid when the list is not
+     *          empty and Valid otherwise. The problems are returned, not
+     *          queued on errors(). It does not check orientation,
+     *          self-intersection or `max_edge_length`.
+     */
     std::vector<std::string> validate() override
     {
         setStatus(ComponentStatus::Validating);
@@ -162,12 +237,23 @@ class MeshGeneratorComponent : public AbstractModelComponent
         return problems;
     }
 
+    //! Moves to Updated with the message "prepared".
     void prepare() override
     {
         setStatus(ComponentStatus::Preparing);
         setStatus(ComponentStatus::Updated, "prepared");
     }
 
+    /*!
+     * \brief Generates the mesh in one step and serves it on `mesh`.
+     *
+     * Status messages, in order: "triangulating", the triangulator's
+     * stages, the quad mesher's stages when `quad_quality` is above 0, and
+     * Done with "meshed". A tool failure, or a failure writing
+     * `output_path`, moves to Failed with the tool's or writer's message
+     * and leaves the previous mesh in place. A relative `output_path` is
+     * relative to the process's working directory.
+     */
     void update(const std::vector<IOutput *> & = {}) override
     {
         setStatus(ComponentStatus::Updating, "triangulating");
@@ -225,19 +311,34 @@ class MeshGeneratorComponent : public AbstractModelComponent
         setStatus(ComponentStatus::Done, "meshed");
     }
 
+    /*!
+     * \brief Moves through Finishing to Finished; the mesh stays readable
+     *        until the component is destroyed.
+     */
     void finish() override
     {
         setStatus(ComponentStatus::Finishing);
         setStatus(ComponentStatus::Finished);
     }
 
+    //! `boundary`, an N x 2 table of x, y; registered, never deleted.
     SDK::Argument2DDouble *boundary      = nullptr;
+    //! `max_edge_length`; registered, never deleted.
     SDK::Argument1DDouble *maxEdgeLength = nullptr;
+    //! `quad_quality`, in [0, 1]; registered, never deleted.
     SDK::Argument1DDouble *quadQuality   = nullptr;
+    //! `output_path`, optional; registered, never deleted.
     SDK::Argument1DString *outputPath    = nullptr;
+    //! The `mesh` output; registered, never deleted.
     MeshSurfaceOutput     *mesh          = nullptr;
 
   protected:
+    /*!
+     * \brief Creates the four arguments with defaults that mesh a 100 by
+     *        100 square: `boundary` (0, 0), (100, 0), (100, 100), (0, 100),
+     *        `max_edge_length` 0, `quad_quality` 0 and an empty optional
+     *        `output_path` with the file filter "UGRID NetCDF (*.nc)".
+     */
     void createArguments() override
     {
         // The defaults mesh a 100 x 100 square: a composition host
@@ -274,23 +375,45 @@ class MeshGeneratorComponent : public AbstractModelComponent
         addArgument(outputPath);
     }
 
+    /*!
+     * \brief Accepts any arguments; validate() and update() read them.
+     * \param[out] message Cleared.
+     * \returns true.
+     */
     bool initializeArguments(std::string &message) override
     {
         message.clear();
         return true;
     }
 
+    //! The component has no inputs.
     void createInputs() override {}
 
+    //! Creates the `mesh` output, empty until the first update().
     void createOutputs() override
     {
         mesh = new MeshSurfaceOutput("mesh", this);
         addOutput(mesh);
     }
 
+    //! Nothing to release: argument initialization cannot fail.
     void initializeFailureCleanUp() override {}
 
   private:
+    /*!
+     * \brief Writes \p result to \p path as a UGRID NetCDF file.
+     *
+     * The NetCDF UGRID writer creates missing parent directories. A mesh
+     * with an empty name is written as `mesh2d`; meshes from the
+     * triangulator are named `triangulation`.
+     * \param[in]  result  The mesh to write.
+     * \param[in]  path    The file path, as given in `output_path`.
+     * \param[out] message "Writing '\<path\>' failed: \<writer message\>", or,
+     *                     in an SDK built without NetCDF, "output_path is
+     *                     set but this SDK build has no NetCDF support;
+     *                     rebuild with USE_NETCDF or clear output_path".
+     * \returns false when the file was not written.
+     */
     [[nodiscard]] bool writeUgrid(const IO::MeshDefinition &result,
                                   const std::string &path,
                                   std::string &message)
@@ -314,21 +437,34 @@ class MeshGeneratorComponent : public AbstractModelComponent
 #endif
     }
 
+    //! First dimension of `boundary`: one row per vertex.
     Dimension m_vertexDimension{"vertex", "Boundary vertex"};
+    //! Second dimension of `boundary`: the x and y columns.
     Dimension m_xyDimension{"xy", "x, y"};
+    //! The one dimension of the scalar arguments.
     Dimension m_scalarDimension{"scalar", "Single value"};
+    //! Unitless quantity "Coordinate" of `boundary`.
     std::unique_ptr<Quantity> m_coordinate;
+    //! Unitless quantity "Length" of `max_edge_length`.
     std::unique_ptr<Quantity> m_length;
+    //! Unitless quantity "Quality" of `quad_quality`.
     std::unique_ptr<Quantity> m_quality;
+    //! Unitless quantity "Path" of `output_path`.
     std::unique_ptr<Quantity> m_path;
 };
 
 /*!
- * \brief Metadata for MeshGeneratorComponent.
+ * \brief Metadata for MeshGeneratorComponent, and the factory for its
+ *        instances.
+ *
+ * Published by HYDROCOUPLE_DECLARE_COMPONENT; the library owns it.
+ * Component info ID `hydrocouple.components.meshgenerator`, caption
+ * "Mesh Generator", version 0.1.0, tags Provider and Mesh.
  */
 class MeshGeneratorComponentInfo : public AbstractModelComponentInfo
 {
   public:
+    //! Sets the ID, caption, description, developer, version and tags.
     MeshGeneratorComponentInfo()
       : AbstractModelComponentInfo("hydrocouple.components.meshgenerator")
     {
@@ -342,6 +478,12 @@ class MeshGeneratorComponentInfo : public AbstractModelComponentInfo
         setTags({"Provider", "Mesh"});
     }
 
+    /*!
+     * \brief Creates a new instance in the Created state.
+     * \returns An instance with ID
+     *          `hydrocouple.components.meshgenerator.instance`, owned by
+     *          the caller, who destroys it before the library is unloaded.
+     */
     std::unique_ptr<IModelComponent> createComponentInstance() override
     {
         return std::make_unique<MeshGeneratorComponent>(

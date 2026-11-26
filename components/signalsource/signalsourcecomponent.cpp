@@ -39,15 +39,42 @@ namespace
  *   square:   offset ± amplitude   (sign of the sine)
  *   ramp:     offset + amplitude * frac(frequency · step)
  *   constant: offset + amplitude
+ *
+ * A HydroCouple::IModelComponent on the SDK's AbstractModelComponent with
+ * five arguments (`waveform`, `amplitude`, `frequency`, `offset`, `steps`),
+ * no inputs and one output, `signal`, a unitless rank-1 Float64 item of
+ * length 1. initialize() latches the arguments and refuses an unknown
+ * waveform or a `steps` below 1; prepare() resets the step count; each
+ * update() advances the step, writes the sample, and reports Done on step
+ * `steps`. The square wave is `offset + amplitude` wherever the sine is
+ * zero or positive. All quantities are unitless; `frequency` is in cycles
+ * per step.
+ *
+ * Ownership: it creates its arguments and exchange items with `new` and
+ * only registers them with the base class, which lists but never deletes
+ * them, so they are not freed when the instance is destroyed, and each
+ * further initialize() leaves the previous ports behind. It owns the
+ * quantities and dimensions they point to; each Quantity::unitLess()
+ * quantity also allocates a Unit that nothing frees.
+ * It is driven from one thread at a time.
  */
 class SignalSourceComponent : public AbstractModelComponent
 {
   public:
+    /*!
+     * \brief Creates the component in the Created state.
+     * \param[in] id The instance ID; the info passes
+     *               `hydrocouple.components.signal_source.instance`.
+     */
     explicit SignalSourceComponent(std::string_view id)
       : AbstractModelComponent(id, "Signal Source")
     {
     }
 
+    /*!
+     * \brief Reports Valid: initialize() already checked the arguments.
+     * \returns An empty list.
+     */
     std::vector<std::string> validate() override
     {
         setStatus(ComponentStatus::Validating);
@@ -55,6 +82,12 @@ class SignalSourceComponent : public AbstractModelComponent
         return {};
     }
 
+    /*!
+     * \brief Resets the step count to 0 and moves to Updated with the
+     *        message "prepared".
+     *
+     * Preparing again restarts the waveform at step 1.
+     */
     void prepare() override
     {
         setStatus(ComponentStatus::Preparing);
@@ -62,6 +95,13 @@ class SignalSourceComponent : public AbstractModelComponent
         setStatus(ComponentStatus::Updated, "prepared");
     }
 
+    /*!
+     * \brief Advances one step and writes that step's sample to `signal`.
+     *
+     * Reports Updated with the message "stepped", or Done with the same
+     * message once the step count reaches `steps`. It does not check the
+     * state, so a host stops calling it once the component is Done.
+     */
     void update(const std::vector<IOutput *> & = {}) override
     {
         setStatus(ComponentStatus::Updating);
@@ -96,15 +136,31 @@ class SignalSourceComponent : public AbstractModelComponent
                   "stepped");
     }
 
+    /*!
+     * \brief Moves through Finishing to Finished; there is nothing to
+     *        release.
+     */
     void finish() override
     {
         setStatus(ComponentStatus::Finishing);
         setStatus(ComponentStatus::Finished);
     }
 
+    //! The `signal` output, created by createOutputs() and registered with the
+    //! base class, which does not delete it; null before the first
+    //! initialize().
     Output1DDouble *signal = nullptr;
 
   protected:
+    /*!
+     * \brief Creates the five arguments with their defaults: `waveform`
+     *        "sine", `amplitude` 1, `frequency` 1, `offset` 0 and
+     *        `steps` 10.
+     *
+     * `waveform` carries a Quality listing the four waveforms, so a host
+     * can offer them as choices; the argument itself accepts any string,
+     * and initializeArguments() refuses the others.
+     */
     void createArguments() override
     {
         m_argQuantity.reset(Quantity::unitLess("Signal argument"));
@@ -137,6 +193,14 @@ class SignalSourceComponent : public AbstractModelComponent
         addArgument(m_stepsArgument);
     }
 
+    /*!
+     * \brief Latches the arguments' first values and checks them.
+     * \param[out] message Why the arguments were refused, or cleared.
+     * \returns false, with "waveform "\<w\>" is not one of sine, square,
+     *          ramp, constant" or "steps must be at least 1, not \<n\>",
+     *          when a value is out of range. An argument holding no value
+     *          makes the element access throw std::out_of_range instead.
+     */
     bool initializeArguments(std::string &message) override
     {
         m_waveform = (*m_waveformArgument)[0];
@@ -164,8 +228,13 @@ class SignalSourceComponent : public AbstractModelComponent
         return true;
     }
 
+    //! The component has no inputs.
     void createInputs() override {}
 
+    /*!
+     * \brief Creates the `signal` output: rank 1, length 1, Float64,
+     *        unitless quantity "Signal".
+     */
     void createOutputs() override
     {
         m_signalQuantity.reset(Quantity::unitLess("Signal"));
@@ -174,31 +243,56 @@ class SignalSourceComponent : public AbstractModelComponent
         addOutput(signal);
     }
 
+    //! Nothing to release: a refused argument leaves no partial state.
     void initializeFailureCleanUp() override {}
 
   private:
+    //! The one dimension of every argument and of `signal`.
     Dimension m_scalar{"scalar"};
+    //! Unitless quantity shared by the numeric arguments.
     std::unique_ptr<Quantity> m_argQuantity;
+    //! Unitless quantity "Signal" of the output.
     std::unique_ptr<Quantity> m_signalQuantity;
+    //! The four waveform names, offered to hosts as the argument's choices.
     std::unique_ptr<Quality> m_waveformQuality;
 
+    //! `waveform` argument; registered, never deleted.
     Argument1DString *m_waveformArgument = nullptr;
+    //! `amplitude` argument; registered, never deleted.
     Argument1DDouble *m_amplitudeArgument = nullptr;
+    //! `frequency` argument, cycles per step; registered, never deleted.
     Argument1DDouble *m_frequencyArgument = nullptr;
+    //! `offset` argument; registered, never deleted.
     Argument1DDouble *m_offsetArgument = nullptr;
+    //! `steps` argument, the run length; registered, never deleted.
     Argument1DInt *m_stepsArgument = nullptr;
 
+    //! Latched waveform name.
     std::string m_waveform = "sine";
+    //! Latched amplitude.
     double m_amplitude = 1.0;
+    //! Latched frequency, cycles per step.
     double m_frequency = 1.0;
+    //! Latched offset.
     double m_offset = 0.0;
+    //! Latched run length in steps.
     int m_steps = 10;
+    //! Steps taken since prepare(); the sample index n.
     int m_step = 0;
 };
 
+/*!
+ * \brief Metadata for SignalSourceComponent, and the factory for its
+ *        instances.
+ *
+ * Published by HYDROCOUPLE_DECLARE_COMPONENT; the library owns it.
+ * Component info ID `hydrocouple.components.signal_source`, caption
+ * "Signal Source", version 1.0.0, tags Test and Source.
+ */
 class SignalSourceComponentInfo : public AbstractModelComponentInfo
 {
   public:
+    //! Sets the ID, caption, description, developer, version and tags.
     SignalSourceComponentInfo()
       : AbstractModelComponentInfo("hydrocouple.components.signal_source")
     {
@@ -212,6 +306,12 @@ class SignalSourceComponentInfo : public AbstractModelComponentInfo
         setTags({"Test", "Source"});
     }
 
+    /*!
+     * \brief Creates a new instance in the Created state.
+     * \returns An instance with ID
+     *          `hydrocouple.components.signal_source.instance`, owned by the
+     *          caller, who destroys it before the library is unloaded.
+     */
     std::unique_ptr<IModelComponent> createComponentInstance() override
     {
         return std::make_unique<SignalSourceComponent>(
